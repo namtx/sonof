@@ -1,4 +1,5 @@
 mod api;
+mod apple_music;
 mod artwork;
 mod audiobook;
 mod config;
@@ -49,6 +50,12 @@ enum Commands {
         /// Audio bitrate for compilation (default: 128k, examples: 64k, 96k, 128k, 192k, 256k)
         #[arg(short = 'b', long, default_value = "128k")]
         bitrate: String,
+        /// Add downloaded chapters to Apple Music playlist (macOS only)
+        #[arg(short = 'a', long)]
+        add_to_apple_music: bool,
+        /// Replace existing files and playlists if they already exist
+        #[arg(short = 'R', long)]
+        replace: bool,
     },
 }
 
@@ -118,6 +125,8 @@ async fn main() -> Result<()> {
             chapters,
             compile,
             bitrate,
+            add_to_apple_music,
+            replace,
         } => {
             let token = config::load_token()?;
             let client = api::FonosClient::new(token);
@@ -127,6 +136,12 @@ async fn main() -> Result<()> {
             // Determine output directory
             let output_dir =
                 output.unwrap_or_else(|| PathBuf::from(&sanitize_filename(&book.title)));
+
+            // Handle replace flag
+            if replace && output_dir.exists() {
+                println!("🗑️  Removing existing directory: {}", output_dir.display());
+                std::fs::remove_dir_all(&output_dir)?;
+            }
 
             std::fs::create_dir_all(&output_dir)?;
 
@@ -169,6 +184,15 @@ async fn main() -> Result<()> {
             let cover_path = match cover_result {
                 Ok(path) => {
                     cover_pb.finish_with_message("✓ Cover downloaded");
+
+                    // Copy cover to output directory
+                    if let Some(filename) = path.file_name() {
+                        let output_cover_path = output_dir.join(filename);
+                        if let Err(e) = std::fs::copy(&path, &output_cover_path) {
+                            eprintln!("⚠ Warning: Failed to copy cover to output directory: {}", e);
+                        }
+                    }
+
                     Some(path)
                 }
                 Err(e) => {
@@ -215,6 +239,17 @@ async fn main() -> Result<()> {
                 let default_filename = format!("chapter_{}.m4a", chapter_num);
                 let filename = chapter.url.split('/').last().unwrap_or(&default_filename);
                 let output_path = output_dir.join(format!("{:03}_{}", chapter_num, filename));
+
+                // Check if chapter already exists
+                if output_path.exists() {
+                    overall_pb.set_message(format!(
+                        "✓ Skipping Chapter {}/{} - {} (already exists)",
+                        chapter_num, total_chapters, chapter.name
+                    ));
+                    downloaded_files.push(output_path);
+                    overall_pb.inc(1);
+                    continue;
+                }
 
                 // Download
                 overall_pb.set_message(format!(
@@ -271,6 +306,35 @@ async fn main() -> Result<()> {
                 .await?;
 
                 compile_pb.finish_with_message(format!("✓ Compiled to: {}", m4b_path.display()));
+            }
+
+            // Add to Apple Music playlist if requested
+            if add_to_apple_music && !downloaded_files.is_empty() {
+                println!();
+                let apple_music_pb = ProgressBar::new_spinner();
+                apple_music_pb.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.cyan} {msg}")
+                        .expect("Invalid template")
+                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                );
+                apple_music_pb.set_message("🎵 Adding to Apple Music playlist...");
+                apple_music_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+                match apple_music::add_to_playlist(&book.title, &downloaded_files, replace) {
+                    Ok(_) => {
+                        let msg = if replace {
+                            format!("✓ Replaced playlist: {}", book.title)
+                        } else {
+                            format!("✓ Added to playlist: {}", book.title)
+                        };
+                        apple_music_pb.finish_with_message(msg);
+                    }
+                    Err(e) => {
+                        apple_music_pb
+                            .finish_with_message(format!("⚠ Failed to add to Apple Music: {}", e));
+                    }
+                }
             }
 
             // Clean up temporary directory

@@ -169,7 +169,7 @@ pub async fn embed_artwork(audio_file: &Path, artwork_file: &Path) -> Result<()>
     let temp_output = audio_file.with_extension("tmp.m4a");
 
     // Use ffmpeg to embed the artwork
-    let status = Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .arg("-i")
         .arg(audio_file)
         .arg("-i")
@@ -187,10 +187,13 @@ pub async fn embed_artwork(audio_file: &Path, artwork_file: &Path) -> Result<()>
         .output()
         .context("Failed to execute ffmpeg for artwork embedding")?;
 
-    if !status.status.success() {
-        // If ffmpeg fails, just keep the original file
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         let _ = std::fs::remove_file(&temp_output);
-        return Ok(());
+        anyhow::bail!(
+            "ffmpeg failed to embed artwork: {}",
+            stderr.lines().take(5).collect::<Vec<_>>().join(" | ")
+        );
     }
 
     // Replace original file with the one that has artwork

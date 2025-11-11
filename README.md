@@ -13,6 +13,9 @@ A command-line tool to download audiobooks from the Fonos app.
 - 🎨 Automatic chapter artwork generation with chapter numbers overlaid
 - 📖 Compile chapters into single m4b audiobook file with embedded artwork
 - 🔧 Customizable audio quality (bitrate) for compiled audiobooks
+- 🎵 Add downloaded chapters to Apple Music playlist (macOS only)
+- 🔄 Replace mode to overwrite existing files and playlists
+- ⏯️ Smart resume: automatically skip already downloaded chapters
 - 🧹 Automatic cleanup of temporary files
 
 ## Installation
@@ -120,11 +123,14 @@ sonof download 1120 -o ~/Audiobooks/MyBook
 **Note**: When downloading chapters, the tool automatically:
 1. Fetches resource permissions for CDN access (📥)
 2. Downloads the book's cover image (📥)
-3. Downloads each chapter with real-time progress (⬇️)
-4. Generates unique artwork for each chapter with the chapter number overlaid (🎨)
-5. Embeds the artwork into each chapter file
-6. Cleans up temporary files when finished
-7. This allows you to easily identify chapters by their artwork in your audio player
+3. Checks if each chapter already exists and skips it if present (✓)
+4. Downloads each chapter with real-time progress (⬇️)
+5. Generates unique artwork for each chapter with the chapter number overlaid (🎨)
+6. Embeds the artwork into each chapter file
+7. Cleans up temporary files when finished
+8. This allows you to easily identify chapters by their artwork in your audio player
+
+**Smart Resume**: If a download is interrupted or fails, simply run the same command again. Already downloaded chapters will be automatically skipped, and only missing chapters will be downloaded. Use the `--replace` (`-R`) flag if you want to force re-download all chapters.
 
 #### Download specific chapters only
 
@@ -186,6 +192,54 @@ Available bitrate options:
 - `192k` - High quality
 - `256k` - Very high quality, larger file size
 
+#### Add chapters to Apple Music playlist
+
+```bash
+sonof download BOOK_ID --add-to-apple-music
+# or use the short flag
+sonof download BOOK_ID -a
+```
+
+This will automatically add all downloaded chapter files to an Apple Music playlist named after the book title. The playlist will be created if it doesn't exist, or chapters will be added to the existing playlist.
+
+**Note**: This feature is only available on macOS and requires the Music app to be installed.
+
+Example:
+```bash
+sonof download 1120 --add-to-apple-music
+# or with other options
+sonof download 1120 -a -o ~/Audiobooks
+# or combine with compilation
+sonof download 1120 -a -m
+```
+
+#### Replace existing files and playlists
+
+```bash
+sonof download BOOK_ID --replace
+# or use the short flag
+sonof download BOOK_ID -R
+```
+
+When using the `--replace` flag:
+- If the output directory already exists, it will be **completely removed** and recreated
+- If an Apple Music playlist with the book title exists, it will be **deleted and recreated**
+- This is useful when you want to re-download a book or refresh your library
+
+**⚠️ Warning**: The replace option will delete all existing files in the output directory and remove the playlist. Use with caution!
+
+Example:
+```bash
+# Re-download and replace all files
+sonof download 1120 --replace
+
+# Replace files and playlist
+sonof download 1120 -R -a
+
+# Combine with all other options
+sonof download 1120 -R -a -m -b 192k
+```
+
 **Note**: FFmpeg must be installed for this feature to work. The compilation process re-encodes audio to AAC format for m4b compatibility.
 
 Installing FFmpeg (required):
@@ -230,6 +284,8 @@ sonof download <BOOK_ID> [OPTIONS]
 | `--chapters` | `-c` | Comma-separated list of chapter numbers to download | All chapters |
 | `--compile` | `-m` | Compile chapters into a single m4b audiobook | false |
 | `--bitrate` | `-b` | Audio bitrate for compilation (e.g., 64k, 96k, 128k, 192k, 256k) | 128k |
+| `--add-to-apple-music` | `-a` | Add downloaded chapters to Apple Music playlist (macOS only) | false |
+| `--replace` | `-R` | Replace existing files and playlists (⚠️ deletes existing content) | false |
 
 ## Examples
 
@@ -262,6 +318,26 @@ sonof download 1120 -m
 sonof download 1120 --compile --bitrate 192k
 # or using short flags
 sonof download 1120 -m -b 192k
+
+# 8. Download and add to Apple Music playlist (macOS only)
+sonof download 1120 --add-to-apple-music
+# or using short flag
+sonof download 1120 -a
+
+# 9. Download, compile, and add to Apple Music in one command
+sonof download 1120 --compile --add-to-apple-music
+# or using short flags
+sonof download 1120 -m -a
+
+# 10. Replace existing download and playlist
+sonof download 1120 --replace
+# or using short flag
+sonof download 1120 -R
+
+# 11. Replace everything with all options combined
+sonof download 1120 --replace --compile --add-to-apple-music --bitrate 192k
+# or using short flags
+sonof download 1120 -R -m -a -b 192k
 ```
 
 ## File Structure
@@ -353,6 +429,55 @@ This error has been fixed. The tool now automatically re-encodes audio to AAC fo
 - Make sure you're using the latest version
 - Try using a different bitrate (e.g., `--bitrate 96k`)
 - Verify that FFmpeg is properly installed and up to date
+
+### Apple Music integration issues
+
+If you encounter issues when using `--add-to-apple-music`:
+
+**"Apple Music integration is only available on macOS"**
+- This feature only works on macOS systems with the Music app installed
+- On other operating systems, download the files without this flag
+
+**"Music app is not available on this system"**
+- Ensure the Music app is installed on your Mac
+- Try opening Music app manually to verify it works
+
+**"Failed to add to Apple Music" errors**
+- Make sure the Music app has the necessary permissions
+- Check that the downloaded files are in a location accessible to the Music app
+- Try adding one file manually to verify Music app is working correctly
+- If the playlist name contains special characters, the tool will handle escaping automatically
+
+**Playlist already exists**
+- By default, if a playlist with the book title already exists, the tool will add the chapters to that existing playlist
+- Use the `--replace` flag if you want to delete and recreate the playlist instead
+- This allows you to re-download or add additional chapters without creating duplicate playlists
+
+### Files already exist
+
+If you try to download to a directory that already exists:
+- **Without `--replace`**: Existing chapter files will be automatically skipped (smart resume)
+- **With `--replace` (`-R`)**: The entire directory will be removed first, then all chapters re-downloaded
+
+**Smart Resume Behavior**:
+```bash
+# First download - downloads chapters 1-10
+sonof download 1120
+
+# Download interrupted at chapter 5 - run the same command again
+sonof download 1120
+# Result: Skips chapters 1-4, continues from chapter 5
+
+# Force re-download everything
+sonof download 1120 -R
+# Result: Removes all files and downloads everything fresh
+```
+
+Use `--replace` when:
+- You want to ensure a clean, fresh download
+- You suspect downloaded files are corrupted
+- You want to remove old files that might not be part of the current download
+- You want to reset both files and Apple Music playlists
 
 ## License
 
