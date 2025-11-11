@@ -5,13 +5,15 @@ A command-line tool to download audiobooks from the Fonos app.
 ## Features
 
 - 🔐 Authenticate with JWT token
-- 📚 List all books in your library
-- ℹ️ View detailed book information
-- ⬇️ Download audiobook chapters
-- 📊 Progress bar for downloads
-- 🎯 Selective chapter downloads
-- 🎨 Automatic chapter artwork generation with chapter numbers
+- 📚 List all books in your library with titles
+- ℹ️ View detailed book information (title, author, duration, chapters, categories)
+- ⬇️ Download audiobook chapters with progress indicators
+- 📊 Real-time progress bars with emoji feedback
+- 🎯 Selective chapter downloads (choose specific chapters)
+- 🎨 Automatic chapter artwork generation with chapter numbers overlaid
 - 📖 Compile chapters into single m4b audiobook file with embedded artwork
+- 🔧 Customizable audio quality (bitrate) for compiled audiobooks
+- 🧹 Automatic cleanup of temporary files
 
 ## Installation
 
@@ -61,9 +63,8 @@ sonof list
 ```
 
 This will display:
-- Book ID (entity ID)
-- Book entity type
-- Purchase date
+- Book ID
+- Book title
 
 ### 3. View book details
 
@@ -80,6 +81,7 @@ sonof info 1120
 
 This will show:
 - Title
+- Author (if available)
 - Duration
 - Price
 - Status
@@ -104,23 +106,32 @@ sonof download 1120
 
 ```bash
 sonof download BOOK_ID --output /path/to/directory
+# or use the short flag
+sonof download BOOK_ID -o /path/to/directory
 ```
 
 Example:
 ```bash
 sonof download 1120 --output ~/Audiobooks/MyBook
+# or
+sonof download 1120 -o ~/Audiobooks/MyBook
 ```
 
 **Note**: When downloading chapters, the tool automatically:
-1. Downloads the book's cover image
-2. Generates unique artwork for each chapter with the chapter number overlaid
-3. Embeds the artwork into each chapter file
-4. This allows you to easily identify chapters by their artwork in your audio player
+1. Fetches resource permissions for CDN access (📥)
+2. Downloads the book's cover image (📥)
+3. Downloads each chapter with real-time progress (⬇️)
+4. Generates unique artwork for each chapter with the chapter number overlaid (🎨)
+5. Embeds the artwork into each chapter file
+6. Cleans up temporary files when finished
+7. This allows you to easily identify chapters by their artwork in your audio player
 
 #### Download specific chapters only
 
 ```bash
 sonof download BOOK_ID --chapters "1,2,3,5,10"
+# or use the short flag
+sonof download BOOK_ID -c "1,2,3,5,10"
 ```
 
 This will only download chapters 1, 2, 3, 5, and 10.
@@ -128,12 +139,16 @@ This will only download chapters 1, 2, 3, 5, and 10.
 Example:
 ```bash
 sonof download 1120 --chapters "1,2,3" --output ~/Audiobooks
+# or with short flags
+sonof download 1120 -c "1,2,3" -o ~/Audiobooks
 ```
 
 #### Compile chapters into a single m4b audiobook
 
 ```bash
 sonof download BOOK_ID --compile
+# or use the short flag
+sonof download BOOK_ID -m
 ```
 
 This will download all chapters and automatically compile them into a single `.m4b` audiobook file with:
@@ -145,6 +160,12 @@ This will download all chapters and automatically compile them into a single `.m
 
 Individual chapter files will also have chapter-specific artwork with the chapter number displayed.
 
+The compilation process (📦):
+- Shows a real-time progress spinner
+- Automatically re-encodes audio to AAC format for m4b compatibility
+- Embeds chapter markers and metadata
+- Embeds the book's cover artwork
+
 Example:
 ```bash
 sonof download 1120 --compile --output ~/Audiobooks
@@ -154,6 +175,8 @@ sonof download 1120 --compile --output ~/Audiobooks
 
 ```bash
 sonof download BOOK_ID --compile --bitrate 192k
+# or use the short flag
+sonof download BOOK_ID -m -b 192k
 ```
 
 Available bitrate options:
@@ -175,6 +198,39 @@ Installing ImageMagick (optional, for enhanced chapter number rendering):
 - **Linux**: `sudo apt install imagemagick` (Debian/Ubuntu) or `sudo yum install imagemagick` (CentOS/RHEL)
 - **Windows**: Download from [imagemagick.org](https://imagemagick.org/)
 
+## Command-Line Flags Reference
+
+### Login Command
+```bash
+sonof login --token <TOKEN>
+```
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--token` | `-t` | JWT token from Fonos app |
+
+### List Command
+```bash
+sonof list
+```
+No additional flags required.
+
+### Info Command
+```bash
+sonof info <BOOK_ID>
+```
+No additional flags required.
+
+### Download Command
+```bash
+sonof download <BOOK_ID> [OPTIONS]
+```
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--output` | `-o` | Output directory for downloaded files | Current directory / Book title |
+| `--chapters` | `-c` | Comma-separated list of chapter numbers to download | All chapters |
+| `--compile` | `-m` | Compile chapters into a single m4b audiobook | false |
+| `--bitrate` | `-b` | Audio bitrate for compilation (e.g., 64k, 96k, 128k, 192k, 256k) | 128k |
+
 ## Examples
 
 ### Complete workflow
@@ -194,12 +250,18 @@ sonof download 1120
 
 # 5. Download only specific chapters
 sonof download 1120 --chapters "1,2,3"
+# or using short flag
+sonof download 1120 -c "1,2,3"
 
 # 6. Download and compile into a single m4b audiobook
 sonof download 1120 --compile
+# or using short flags
+sonof download 1120 -m
 
 # 7. Download and compile with higher quality
 sonof download 1120 --compile --bitrate 192k
+# or using short flags
+sonof download 1120 -m -b 192k
 ```
 
 ## File Structure
@@ -239,6 +301,8 @@ The compiled `.m4b` file includes:
 - All chapters with embedded chapter markers and metadata
 - Book cover artwork (without chapter numbers)
 - Individual chapter files retain their chapter-specific artwork
+
+**Note**: The tool automatically cleans up temporary files used during artwork generation after the download completes.
 
 ## API Endpoints Used
 
