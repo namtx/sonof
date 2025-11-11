@@ -235,10 +235,8 @@ async fn main() -> Result<()> {
             for (_completed, (idx, chapter)) in chapters_to_download.iter().enumerate() {
                 let chapter_num = idx + 1;
 
-                // Extract filename from URL
-                let default_filename = format!("chapter_{}.m4a", chapter_num);
-                let filename = chapter.url.split('/').last().unwrap_or(&default_filename);
-                let output_path = output_dir.join(format!("{:03}_{}", chapter_num, filename));
+                // Generate simple numeric filename (001.m4a, 002.m4a, etc.)
+                let output_path = output_dir.join(format!("{:03}.m4a", chapter_num));
 
                 // Check if chapter already exists
                 if output_path.exists() {
@@ -246,7 +244,8 @@ async fn main() -> Result<()> {
                         "✓ Skipping Chapter {}/{} - {} (already exists)",
                         chapter_num, total_chapters, chapter.name
                     ));
-                    downloaded_files.push(output_path);
+                    downloaded_files.push(output_path.clone());
+
                     overall_pb.inc(1);
                     continue;
                 }
@@ -261,22 +260,31 @@ async fn main() -> Result<()> {
                     .download_chapter(&chapter.url, &permissions, &output_path)
                     .await?;
 
-                // Add chapter artwork if cover was downloaded
+                // Generate and embed chapter artwork
                 if let Some(ref cover) = cover_path {
                     overall_pb.set_message(format!(
-                        "🎨 Artwork Chapter {}/{} - {}",
+                        "🎨 Generating artwork Chapter {}/{} - {}",
                         chapter_num, total_chapters, chapter.name
                     ));
 
-                    if let Err(e) =
-                        artwork::add_chapter_artwork(&output_path, cover, chapter_num, &temp_dir)
-                            .await
-                    {
-                        overall_pb.println(format!("  ⚠ Failed to add artwork: {}", e));
+                    // Generate the chapter artwork (saved in temp_dir)
+                    match artwork::generate_simple_chapter_artwork(cover, chapter_num, &temp_dir) {
+                        Ok(artwork_path) => {
+                            // Embed artwork in file
+                            if let Err(e) =
+                                artwork::embed_artwork(&output_path, &artwork_path).await
+                            {
+                                overall_pb.println(format!("  ⚠ Failed to embed artwork: {}", e));
+                            }
+                        }
+                        Err(e) => {
+                            overall_pb.println(format!("  ⚠ Failed to generate artwork: {}", e));
+                        }
                     }
                 }
 
-                downloaded_files.push(output_path);
+                downloaded_files.push(output_path.clone());
+
                 overall_pb.inc(1);
             }
 
@@ -311,28 +319,19 @@ async fn main() -> Result<()> {
             // Add to Apple Music playlist if requested
             if add_to_apple_music && !downloaded_files.is_empty() {
                 println!();
-                let apple_music_pb = ProgressBar::new_spinner();
-                apple_music_pb.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner:.cyan} {msg}")
-                        .expect("Invalid template")
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                );
-                apple_music_pb.set_message("🎵 Adding to Apple Music playlist...");
-                apple_music_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+                println!("🎵 Apple Music Integration");
+                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
+                // Add files to playlist (artwork is already embedded in the audio files)
                 match apple_music::add_to_playlist(&book.title, &downloaded_files, replace) {
                     Ok(_) => {
-                        let msg = if replace {
-                            format!("✓ Replaced playlist: {}", book.title)
-                        } else {
-                            format!("✓ Added to playlist: {}", book.title)
-                        };
-                        apple_music_pb.finish_with_message(msg);
+                        println!(
+                            "✅ Successfully added {} files to Apple Music playlist",
+                            downloaded_files.len()
+                        );
                     }
                     Err(e) => {
-                        apple_music_pb
-                            .finish_with_message(format!("⚠ Failed to add to Apple Music: {}", e));
+                        eprintln!("❌ Failed to add to Apple Music: {}", e);
                     }
                 }
             }

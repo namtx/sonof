@@ -168,22 +168,31 @@ fn add_text_with_imagemagick(
 pub async fn embed_artwork(audio_file: &Path, artwork_file: &Path) -> Result<()> {
     let temp_output = audio_file.with_extension("tmp.m4a");
 
-    // Use ffmpeg to embed the artwork
+    // Use ffmpeg to embed the artwork with proper metadata for Apple Music/iTunes compatibility
+    // The key is using -c:v copy for the video stream and -disposition:v:0 attached_pic
     let output = Command::new("ffmpeg")
         .arg("-i")
         .arg(audio_file)
         .arg("-i")
         .arg(artwork_file)
         .arg("-map")
-        .arg("0:a")
+        .arg("0:a") // Map audio from first input
         .arg("-map")
-        .arg("1:v")
-        .arg("-c")
-        .arg("copy")
+        .arg("1:0") // Map first stream from second input (image)
+        .arg("-c:a")
+        .arg("copy") // Copy audio codec
+        .arg("-c:v")
+        .arg("copy") // Copy video/image codec
         .arg("-disposition:v:0")
-        .arg("attached_pic")
+        .arg("attached_pic") // Mark as attached picture
+        .arg("-metadata:s:v")
+        .arg("title=Album cover") // Add metadata for Apple Music
+        .arg("-metadata:s:v")
+        .arg("comment=Cover (front)") // iTunes/Apple Music compatibility
         .arg("-y")
         .arg(&temp_output)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
         .output()
         .context("Failed to execute ffmpeg for artwork embedding")?;
 
@@ -200,10 +209,39 @@ pub async fn embed_artwork(audio_file: &Path, artwork_file: &Path) -> Result<()>
     std::fs::rename(&temp_output, audio_file)
         .context("Failed to replace audio file with artwork-embedded version")?;
 
+    // Verify the artwork was embedded by checking the file
+    verify_artwork_embedded(audio_file)?;
+
+    Ok(())
+}
+
+/// Verify that artwork is properly embedded in the audio file
+fn verify_artwork_embedded(audio_file: &Path) -> Result<()> {
+    let output = Command::new("ffmpeg")
+        .arg("-i")
+        .arg(audio_file)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .output()
+        .context("Failed to verify artwork embedding")?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    // Check if there's a video stream (which indicates embedded artwork)
+    if !stderr.contains("Video:") && !stderr.contains("attached_pic") {
+        anyhow::bail!(
+            "Artwork verification failed: no embedded image found in the audio file"
+        );
+    }
+
     Ok(())
 }
 
 /// Generate chapter artwork and embed it into the audio file
+/// 
+/// Note: This function is kept for backward compatibility.
+/// The main download flow now generates and embeds artwork separately.
+#[allow(dead_code)]
 pub async fn add_chapter_artwork(
     audio_file: &Path,
     cover_path: &Path,

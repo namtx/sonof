@@ -192,7 +192,7 @@ Available bitrate options:
 - `192k` - High quality
 - `256k` - Very high quality, larger file size
 
-#### Add chapters to Apple Music playlist
+#### Add chapters to Apple Music playlist with artwork
 
 ```bash
 sonof download BOOK_ID --add-to-apple-music
@@ -200,7 +200,24 @@ sonof download BOOK_ID --add-to-apple-music
 sonof download BOOK_ID -a
 ```
 
-This will automatically add all downloaded chapter files to an Apple Music playlist named after the book title. The playlist will be created if it doesn't exist, or chapters will be added to the existing playlist.
+This will automatically:
+1. Add all downloaded chapter files to an Apple Music playlist named after the book title
+2. Set the chapter-specific artwork for each track directly in Apple Music using AppleScript
+3. The artwork is set via Apple Music's API, ensuring maximum compatibility
+
+The playlist will be created if it doesn't exist, or chapters will be added to the existing playlist.
+
+**How it works (Batch Processing):**
+1. **Phase 1**: Add all files to the playlist quickly (no delays)
+2. **Phase 2**: Wait 3 seconds for Apple Music to index all the files
+3. **Phase 3**: Set artwork for all tracks in batch (with minimal retries if needed)
+
+This 3-phase approach is much more efficient than setting artwork immediately after each file:
+- Faster overall process (no waiting between individual files)
+- Higher success rate (Apple Music has time to index)
+- Better user experience with clear progress indicators
+- Each chapter file also has artwork embedded via ffmpeg (for compatibility with other players)
+- Both PNG and JPEG artwork formats are supported
 
 **Note**: This feature is only available on macOS and requires the Music app to be installed.
 
@@ -452,6 +469,76 @@ If you encounter issues when using `--add-to-apple-music`:
 - By default, if a playlist with the book title already exists, the tool will add the chapters to that existing playlist
 - Use the `--replace` flag if you want to delete and recreate the playlist instead
 - This allows you to re-download or add additional chapters without creating duplicate playlists
+
+### Artwork not showing in Apple Music
+
+**New AppleScript Integration (v0.1.0+)**
+
+As of the latest version, artwork is set directly in Apple Music using AppleScript when you use the `--add-to-apple-music` (`-a`) flag. This provides the most reliable artwork display in Apple Music.
+
+**How the new system works:**
+1. Artwork is embedded in the audio file via ffmpeg (for other players)
+2. When adding to Apple Music, artwork is also set directly via AppleScript
+3. This dual approach ensures artwork works in Apple Music and other audio players
+
+**If artwork still isn't showing:**
+
+**Batch processing with smart indexing**
+- The tool uses a 3-phase approach: add files → wait for indexing → set artwork
+- A 3-second initial wait allows Apple Music to index all files
+- Minimal retries are needed (usually 0-3 per file) since files are already indexed
+- You'll see clear progress: "Adding files...", "Waiting for indexing...", "Setting artwork..."
+- Final summary shows success rate (e.g., "Set artwork for 30/31 tracks (1 failed)")
+
+**Check Apple Music permissions**
+- Go to System Settings > Privacy & Security > Automation
+- Ensure your Terminal/iTerm has permission to control Music
+
+**Verify the track was added**
+```bash
+# After running with -a flag, check in Apple Music:
+1. Open the playlist (named after your book title)
+2. Right-click on a track → "Song Info" or "Get Info"
+3. Go to the "Artwork" tab
+4. The chapter artwork should be displayed
+```
+
+**Force reimport**
+- Remove the playlist from Apple Music
+- Run the download command again with `-R -a` flags to replace everything
+- This ensures fresh files and re-runs the AppleScript artwork setting
+
+**If some artwork still fails**
+With batch processing, failures are rare but can happen if:
+- Your Mac is very slow or under heavy load
+- You have a very large library that takes time to index
+- The files are on a network drive with slow access
+
+What to do:
+1. Check the final summary (e.g., "Set artwork for 30/31 tracks (1 failed)")
+2. For any failed tracks, the tool shows the artwork file path
+3. Manually add artwork:
+   - Open Apple Music
+   - Find the track in the playlist
+   - Right-click → "Get Info" → "Artwork" tab
+   - Click "Add Artwork..." and select the `chapter_X_artwork.jpg` file shown in the error
+
+**Tip**: If many tracks fail (more than 20%), try:
+- Closing and reopening Apple Music before running the command
+- Running the command again with `-R -a` to force fresh import
+- Checking that your system isn't under heavy load
+
+**Check embedded artwork (for other players)**
+```bash
+# Verify artwork is embedded in the file for non-Apple Music players
+ffmpeg -i "path/to/chapter_file.m4a" 2>&1 | grep -i "video\|attached"
+```
+- You should see a line like "Video: mjpeg" or "attached_pic"
+- This is for compatibility with other audio players
+
+**Manual fallback**
+- The tool saves `cover.jpg` and `chapter_X_artwork.jpg` files in the output directory
+- You can manually add these to tracks in Apple Music via "Get Info" > "Artwork" > "Add Artwork" > "Add Artwork..." button
 
 ### Files already exist
 
