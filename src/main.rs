@@ -1,4 +1,6 @@
 mod api;
+mod artwork;
+mod audiobook;
 mod config;
 mod types;
 
@@ -40,6 +42,12 @@ enum Commands {
         /// Download specific chapters only (comma-separated, e.g., "1,2,3")
         #[arg(short, long)]
         chapters: Option<String>,
+        /// Compile chapters into a single m4b audiobook file
+        #[arg(short = 'm', long)]
+        compile: bool,
+        /// Audio bitrate for compilation (default: 128k, examples: 64k, 96k, 128k, 192k, 256k)
+        #[arg(short = 'b', long, default_value = "128k")]
+        bitrate: String,
     },
 }
 
@@ -108,6 +116,8 @@ async fn main() -> Result<()> {
             book_id,
             output,
             chapters,
+            compile,
+            bitrate,
         } => {
             let token = config::load_token()?;
             let client = api::FonosClient::new(token);
@@ -136,6 +146,28 @@ async fn main() -> Result<()> {
             println!("Getting CDN access tokens...");
             let permissions = client.get_resource_permissions(book_id).await?;
 
+            // Create temporary directory for cover and artwork generation
+            let temp_dir = std::env::temp_dir().join(format!("sonof_{}", book_id));
+            std::fs::create_dir_all(&temp_dir)?;
+
+            // Download book cover for artwork generation
+            println!("Downloading book cover...");
+            let cover_result =
+                artwork::download_cover_image(&book.cover_image_url, &temp_dir).await;
+            let cover_path = match cover_result {
+                Ok(path) => {
+                    println!("  ✓ Cover downloaded to temp directory");
+                    Some(path)
+                }
+                Err(e) => {
+                    println!("  ⚠ Failed to download cover: {}", e);
+                    None
+                }
+            };
+
+            // Track downloaded chapter files for compilation
+            let mut downloaded_files = Vec::new();
+
             // Download chapters
             for (idx, chapter) in book.chapters.iter().enumerate() {
                 let chapter_num = idx + 1;
@@ -159,9 +191,43 @@ async fn main() -> Result<()> {
                     .await?;
 
                 println!("  ✓ Saved to {}", output_path.display());
+
+                // Add chapter artwork if cover was downloaded
+                if let Some(ref cover) = cover_path {
+                    println!("  Adding chapter artwork...");
+                    if let Err(e) =
+                        artwork::add_chapter_artwork(&output_path, cover, chapter_num, &temp_dir)
+                            .await
+                    {
+                        println!("  ⚠ Failed to add artwork: {}", e);
+                    } else {
+                        println!("  ✓ Artwork added");
+                    }
+                }
+
+                downloaded_files.push(output_path);
             }
 
             println!("\n✓ Download complete!");
+
+            // Compile chapters into m4b if requested
+            if compile && !downloaded_files.is_empty() {
+                let cover_for_m4b = cover_path.as_ref().map(|p| p.as_path());
+                audiobook::compile_to_m4b_with_artwork(
+                    &book,
+                    &downloaded_files,
+                    &output_dir,
+                    &bitrate,
+                    cover_for_m4b,
+                )
+                .await?;
+            }
+
+            // Clean up temporary directory
+            if temp_dir.exists() {
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                println!("Cleaned up temporary files");
+            }
         }
     }
 

@@ -10,12 +10,16 @@ A command-line tool to download audiobooks from the Fonos app.
 - ⬇️ Download audiobook chapters
 - 📊 Progress bar for downloads
 - 🎯 Selective chapter downloads
+- 🎨 Automatic chapter artwork generation with chapter numbers
+- 📖 Compile chapters into single m4b audiobook file with embedded artwork
 
 ## Installation
 
 ### Prerequisites
 
 - Rust 1.70 or later
+- FFmpeg (required for artwork embedding and compiling chapters into m4b files)
+- ImageMagick (optional, for better chapter number rendering on artwork)
 
 ### Build from source
 
@@ -107,6 +111,12 @@ Example:
 sonof download 1120 --output ~/Audiobooks/MyBook
 ```
 
+**Note**: When downloading chapters, the tool automatically:
+1. Downloads the book's cover image
+2. Generates unique artwork for each chapter with the chapter number overlaid
+3. Embeds the artwork into each chapter file
+4. This allows you to easily identify chapters by their artwork in your audio player
+
 #### Download specific chapters only
 
 ```bash
@@ -119,6 +129,51 @@ Example:
 ```bash
 sonof download 1120 --chapters "1,2,3" --output ~/Audiobooks
 ```
+
+#### Compile chapters into a single m4b audiobook
+
+```bash
+sonof download BOOK_ID --compile
+```
+
+This will download all chapters and automatically compile them into a single `.m4b` audiobook file with:
+- Embedded chapter markers
+- Book metadata (title, author, description, genre)
+- Book cover artwork embedded
+- Proper audiobook format
+- AAC encoding for maximum compatibility
+
+Individual chapter files will also have chapter-specific artwork with the chapter number displayed.
+
+Example:
+```bash
+sonof download 1120 --compile --output ~/Audiobooks
+```
+
+**Customize audio quality:**
+
+```bash
+sonof download BOOK_ID --compile --bitrate 192k
+```
+
+Available bitrate options:
+- `64k` - Lower quality, smaller file size
+- `96k` - Good quality for speech
+- `128k` - **Default**, excellent quality for audiobooks
+- `192k` - High quality
+- `256k` - Very high quality, larger file size
+
+**Note**: FFmpeg must be installed for this feature to work. The compilation process re-encodes audio to AAC format for m4b compatibility.
+
+Installing FFmpeg (required):
+- **macOS**: `brew install ffmpeg`
+- **Linux**: `sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo yum install ffmpeg` (CentOS/RHEL)
+- **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/)
+
+Installing ImageMagick (optional, for enhanced chapter number rendering):
+- **macOS**: `brew install imagemagick`
+- **Linux**: `sudo apt install imagemagick` (Debian/Ubuntu) or `sudo yum install imagemagick` (CentOS/RHEL)
+- **Windows**: Download from [imagemagick.org](https://imagemagick.org/)
 
 ## Examples
 
@@ -139,21 +194,51 @@ sonof download 1120
 
 # 5. Download only specific chapters
 sonof download 1120 --chapters "1,2,3"
+
+# 6. Download and compile into a single m4b audiobook
+sonof download 1120 --compile
+
+# 7. Download and compile with higher quality
+sonof download 1120 --compile --bitrate 192k
 ```
 
 ## File Structure
 
 Downloaded files are organized as follows:
 
+### Without --compile flag:
 ```
 Book_Title/
-├── 001_chapter_file.m4a
-├── 002_chapter_file.m4a
-├── 003_chapter_file.m4a
+├── cover.jpg                      (book cover image)
+├── chapter_1_artwork.jpg          (chapter 1 artwork with number)
+├── chapter_2_artwork.jpg          (chapter 2 artwork with number)
+├── chapter_3_artwork.jpg          (chapter 3 artwork with number)
+├── 001_chapter_file.m4a           (with embedded chapter 1 artwork)
+├── 002_chapter_file.m4a           (with embedded chapter 2 artwork)
+├── 003_chapter_file.m4a           (with embedded chapter 3 artwork)
 └── ...
 ```
 
-Each chapter is prefixed with a three-digit number for proper ordering.
+Each chapter is:
+- Prefixed with a three-digit number for proper ordering
+- Embedded with unique artwork showing the chapter number
+
+### With --compile flag:
+```
+Book_Title/
+├── cover.jpg                      (book cover image)
+├── chapter_1_artwork.jpg          (chapter 1 artwork with number)
+├── chapter_2_artwork.jpg          (chapter 2 artwork with number)
+├── 001_chapter_file.m4a           (with embedded chapter 1 artwork)
+├── 002_chapter_file.m4a           (with embedded chapter 2 artwork)
+├── ...
+└── Book_Title.m4b                 (compiled audiobook with book cover)
+```
+
+The compiled `.m4b` file includes:
+- All chapters with embedded chapter markers and metadata
+- Book cover artwork (without chapter numbers)
+- Individual chapter files retain their chapter-specific artwork
 
 ## API Endpoints Used
 
@@ -183,6 +268,27 @@ Your token might have expired. Get a new token from the Fonos app and login agai
 - Check your internet connection
 - Verify the book ID is correct
 - Try getting fresh resource permissions by running the download command again
+
+### "Failed to check ffmpeg" error when using --compile
+
+FFmpeg is not installed or not in your PATH. Install it using:
+- **macOS**: `brew install ffmpeg`
+- **Linux**: `sudo apt install ffmpeg` (Debian/Ubuntu)
+- **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/) and add to PATH
+
+### Compilation fails
+
+- Ensure all chapter files were downloaded successfully
+- Check that you have write permissions in the output directory
+- Verify that the chapter files are valid audio files
+- Try running the download again without the `--compile` flag first to verify the downloads work
+
+### "codec not currently supported in container" error
+
+This error has been fixed. The tool now automatically re-encodes audio to AAC format, which is compatible with m4b files. If you still encounter this issue:
+- Make sure you're using the latest version
+- Try using a different bitrate (e.g., `--bitrate 96k`)
+- Verify that FFmpeg is properly installed and up to date
 
 ## License
 

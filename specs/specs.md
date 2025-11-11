@@ -5,6 +5,11 @@ An command line tool to download audio books from the Fonos app.
 ### Features
 
 - List all books in the user's library
+- Download audiobook chapters
+- Download book cover artwork
+- Generate chapter-specific artwork with chapter numbers overlaid
+- Embed artwork into individual chapter files
+- Compile chapters into a single m4b audiobook file with embedded metadata, chapter markers, and cover artwork
 
 #### List all books in the user's library
 
