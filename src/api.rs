@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, COOKIE};
 use std::path::Path;
 use tokio::fs::File;
@@ -181,24 +180,11 @@ impl FonosClient {
             anyhow::bail!("Download failed: {}", response.status());
         }
 
-        // Get content length for progress bar
-        let total_size = response.content_length().unwrap_or(0);
-
-        // Set up progress bar
-        let pb = ProgressBar::new(total_size);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("  [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                .expect("Invalid template")
-                .progress_chars("#>-"),
-        );
-
-        // Download and save
+        // Download and save without separate progress bar
         let mut file = File::create(output_path)
             .await
             .context("Failed to create output file")?;
 
-        let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
 
         use futures_util::StreamExt;
@@ -207,11 +193,7 @@ impl FonosClient {
             file.write_all(&chunk)
                 .await
                 .context("Failed to write to file")?;
-            downloaded += chunk.len() as u64;
-            pb.set_position(downloaded);
         }
-
-        pb.finish_and_clear();
 
         Ok(())
     }

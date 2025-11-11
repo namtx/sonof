@@ -4,16 +4,6 @@ use std::process::Command;
 
 use crate::types::BookDetails;
 
-/// Compile individual chapter files into a single m4b audiobook file
-pub async fn compile_to_m4b(
-    book: &BookDetails,
-    chapter_files: &[PathBuf],
-    output_dir: &Path,
-    bitrate: &str,
-) -> Result<PathBuf> {
-    compile_to_m4b_internal(book, chapter_files, output_dir, bitrate, None).await
-}
-
 /// Compile individual chapter files into a single m4b audiobook file with optional cover art
 pub async fn compile_to_m4b_with_artwork(
     book: &BookDetails,
@@ -36,8 +26,6 @@ async fn compile_to_m4b_internal(
         anyhow::bail!("No chapter files to compile");
     }
 
-    println!("\nCompiling chapters into m4b audiobook...");
-
     // Check if ffmpeg is installed
     check_ffmpeg_installed()?;
 
@@ -52,13 +40,6 @@ async fn compile_to_m4b_internal(
     // Create metadata file with chapters
     let metadata_file = output_dir.join("ffmpeg_metadata.txt");
     create_metadata_file(&metadata_file, book, chapter_files).await?;
-
-    println!("Merging {} chapters...", chapter_files.len());
-    println!("Encoding to AAC at {} bitrate...", bitrate);
-    if cover_path.is_some() {
-        println!("Adding book cover artwork...");
-    }
-    println!("This may take a while depending on the book length...");
 
     // Run ffmpeg to concatenate and add metadata
     // We need to re-encode to AAC for m4b/m4a container compatibility
@@ -104,6 +85,10 @@ async fn compile_to_m4b_internal(
 
     cmd.arg(&output_path);
 
+    // Hide ffmpeg output
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+
     let status = cmd.status().context("Failed to execute ffmpeg")?;
 
     // Clean up temporary files
@@ -113,8 +98,6 @@ async fn compile_to_m4b_internal(
     if !status.success() {
         anyhow::bail!("ffmpeg failed with status: {}", status);
     }
-
-    println!("✓ Compiled to: {}", output_path.display());
 
     Ok(output_path)
 }

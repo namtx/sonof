@@ -6,6 +6,7 @@ mod types;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -80,7 +81,6 @@ async fn main() -> Result<()> {
             let token = config::load_token()?;
             let client = api::FonosClient::new(token);
 
-            println!("Fetching book details...\n");
             let book = client.get_book_details(book_id).await?;
 
             println!("Title: {}", book.title);
@@ -122,18 +122,13 @@ async fn main() -> Result<()> {
             let token = config::load_token()?;
             let client = api::FonosClient::new(token);
 
-            println!("Fetching book details...");
             let book = client.get_book_details(book_id).await?;
-
-            println!("Book: {}", book.title);
-            println!("Chapters: {}\n", book.chapters.len());
 
             // Determine output directory
             let output_dir =
                 output.unwrap_or_else(|| PathBuf::from(&sanitize_filename(&book.title)));
 
             std::fs::create_dir_all(&output_dir)?;
-            println!("Output directory: {}\n", output_dir.display());
 
             // Parse chapter filter
             let chapter_filter: Option<Vec<usize>> = chapters.map(|s| {
@@ -143,24 +138,41 @@ async fn main() -> Result<()> {
             });
 
             // Get resource permissions for CDN access
-            println!("Getting CDN access tokens...");
+            let resource_permissions_pb: ProgressBar = ProgressBar::new_spinner();
+            resource_permissions_pb.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.cyan} {msg}")
+                    .expect("Invalid template")
+                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+            );
+            resource_permissions_pb.set_message("📥 Fetching resource permissions...");
             let permissions = client.get_resource_permissions(book_id).await?;
+            resource_permissions_pb.finish_with_message("✓ Resource permissions fetched");
 
             // Create temporary directory for cover and artwork generation
             let temp_dir = std::env::temp_dir().join(format!("sonof_{}", book_id));
             std::fs::create_dir_all(&temp_dir)?;
 
             // Download book cover for artwork generation
-            println!("Downloading book cover...");
+            let cover_pb = ProgressBar::new_spinner();
+            cover_pb.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.cyan} {msg}")
+                    .expect("Invalid template")
+                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+            );
+            cover_pb.set_message("📥 Downloading book cover...");
+            cover_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
             let cover_result =
                 artwork::download_cover_image(&book.cover_image_url, &temp_dir).await;
             let cover_path = match cover_result {
                 Ok(path) => {
-                    println!("  ✓ Cover downloaded to temp directory");
+                    cover_pb.finish_with_message("✓ Cover downloaded");
                     Some(path)
                 }
                 Err(e) => {
-                    println!("  ⚠ Failed to download cover: {}", e);
+                    cover_pb.finish_with_message(format!("⚠ Failed to download cover: {}", e));
                     None
                 }
             };
@@ -168,52 +180,88 @@ async fn main() -> Result<()> {
             // Track downloaded chapter files for compilation
             let mut downloaded_files = Vec::new();
 
-            // Download chapters
-            for (idx, chapter) in book.chapters.iter().enumerate() {
-                let chapter_num = idx + 1;
-
-                // Skip if chapter filter is specified and this chapter is not in it
-                if let Some(ref filter) = chapter_filter {
-                    if !filter.contains(&chapter_num) {
-                        continue;
+            // Determine which chapters to download
+            let chapters_to_download: Vec<(usize, &_)> = book
+                .chapters
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| {
+                    let chapter_num = idx + 1;
+                    if let Some(ref filter) = chapter_filter {
+                        filter.contains(&chapter_num)
+                    } else {
+                        true
                     }
-                }
+                })
+                .collect();
 
-                println!("Downloading chapter {}: {}", chapter_num, chapter.name);
+            let total_chapters = chapters_to_download.len();
+
+            // Create overall progress bar
+            let overall_pb = ProgressBar::new(total_chapters as u64);
+            overall_pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{msg} [{bar:40.green/white}] {pos}/{len}")
+                    .expect("Invalid template")
+                    .progress_chars("█▓░"),
+            );
+            overall_pb.set_message("📚 Starting download...");
+
+            // Download chapters
+            for (_completed, (idx, chapter)) in chapters_to_download.iter().enumerate() {
+                let chapter_num = idx + 1;
 
                 // Extract filename from URL
                 let default_filename = format!("chapter_{}.m4a", chapter_num);
                 let filename = chapter.url.split('/').last().unwrap_or(&default_filename);
                 let output_path = output_dir.join(format!("{:03}_{}", chapter_num, filename));
 
+                // Download
+                overall_pb.set_message(format!(
+                    "⬇️  Downloading Chapter {}/{} - {}",
+                    chapter_num, total_chapters, chapter.name
+                ));
+
                 client
                     .download_chapter(&chapter.url, &permissions, &output_path)
                     .await?;
 
-                println!("  ✓ Saved to {}", output_path.display());
-
                 // Add chapter artwork if cover was downloaded
                 if let Some(ref cover) = cover_path {
-                    println!("  Adding chapter artwork...");
+                    overall_pb.set_message(format!(
+                        "🎨 Artwork Chapter {}/{} - {}",
+                        chapter_num, total_chapters, chapter.name
+                    ));
+
                     if let Err(e) =
                         artwork::add_chapter_artwork(&output_path, cover, chapter_num, &temp_dir)
                             .await
                     {
-                        println!("  ⚠ Failed to add artwork: {}", e);
-                    } else {
-                        println!("  ✓ Artwork added");
+                        overall_pb.println(format!("  ⚠ Failed to add artwork: {}", e));
                     }
                 }
 
                 downloaded_files.push(output_path);
+                overall_pb.inc(1);
             }
 
-            println!("\n✓ Download complete!");
+            overall_pb.finish_with_message("✅ All chapters complete!");
 
             // Compile chapters into m4b if requested
             if compile && !downloaded_files.is_empty() {
+                println!();
+                let compile_pb = ProgressBar::new_spinner();
+                compile_pb.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.green} {msg}")
+                        .expect("Invalid template")
+                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                );
+                compile_pb.set_message("📦 Compiling chapters into m4b audiobook...");
+                compile_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
                 let cover_for_m4b = cover_path.as_ref().map(|p| p.as_path());
-                audiobook::compile_to_m4b_with_artwork(
+                let m4b_path = audiobook::compile_to_m4b_with_artwork(
                     &book,
                     &downloaded_files,
                     &output_dir,
@@ -221,6 +269,8 @@ async fn main() -> Result<()> {
                     cover_for_m4b,
                 )
                 .await?;
+
+                compile_pb.finish_with_message(format!("✓ Compiled to: {}", m4b_path.display()));
             }
 
             // Clean up temporary directory

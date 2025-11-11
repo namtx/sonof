@@ -16,8 +16,6 @@ pub async fn download_cover_image(cover_url: &str, output_dir: &Path) -> Result<
         format!("{}/{}", CDN_BASE_URL, cover_url.trim_start_matches('/'))
     };
 
-    println!("  Downloading from: {}", cdn_url);
-
     // Download the cover image
     let response = reqwest::get(&cdn_url)
         .await
@@ -38,8 +36,6 @@ pub async fn download_cover_image(cover_url: &str, output_dir: &Path) -> Result<
         .and_then(|v| v.to_str().ok())
         .unwrap_or("image/jpeg")
         .to_string();
-
-    println!("  Content-Type: {}", content_type);
 
     let extension = match content_type.as_str() {
         ct if ct.contains("png") => "png",
@@ -135,29 +131,37 @@ fn add_text_with_imagemagick(
     // Use a large font size - about 60% of the badge size
     let font_size = (badge_size as f32 * 0.6) as u32;
 
-    let status = Command::new("convert")
-        .arg(image_path)
-        .arg("-font")
-        .arg("Helvetica-Bold")
-        .arg("-pointsize")
-        .arg(format!("{}", font_size))
-        .arg("-fill")
-        .arg("white")
-        .arg("-gravity")
-        .arg("center")
-        .arg("-annotate")
-        .arg("+0+0")
-        .arg(format!("{}", chapter_number))
-        .arg(image_path)
-        .status();
+    // Try 'magick' first (ImageMagick v7), then fall back to 'convert' (v6)
+    let commands = ["magick", "convert"];
 
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        _ => {
-            // ImageMagick not available or failed, that's ok
-            Ok(())
+    for cmd in &commands {
+        let mut command = Command::new(cmd);
+        command
+            .arg(image_path)
+            .arg("-font")
+            .arg("Helvetica-Bold")
+            .arg("-pointsize")
+            .arg(format!("{}", font_size))
+            .arg("-fill")
+            .arg("white")
+            .arg("-gravity")
+            .arg("center")
+            .arg("-annotate")
+            .arg("+0+0")
+            .arg(format!("{}", chapter_number))
+            .arg(image_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        if let Ok(status) = command.status() {
+            if status.success() {
+                return Ok(());
+            }
         }
     }
+
+    // ImageMagick not available or failed, that's ok
+    Ok(())
 }
 
 /// Embed artwork into an audio file using ffmpeg
