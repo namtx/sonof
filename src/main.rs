@@ -2,6 +2,7 @@ mod api;
 mod apple_music;
 mod artwork;
 mod audiobook;
+mod chapters;
 mod config;
 mod types;
 
@@ -41,12 +42,13 @@ enum Commands {
         /// Output directory (default: current directory)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Download specific chapters only (comma-separated, e.g., "1,2,3")
+        /// Download specific chapters only. Supports singles and ranges,
+        /// e.g. "1,2,3", "1..5", "2..", "..5", or "1,3..5,7.."
         #[arg(short, long)]
         chapters: Option<String>,
-        /// Compile chapters into a single m4b audiobook file
-        #[arg(short = 'm', long)]
-        compile: bool,
+        /// Skip joining chapters into a single m4b audiobook file
+        #[arg(long)]
+        no_join: bool,
         /// Audio bitrate for compilation (default: 128k, examples: 64k, 96k, 128k, 192k, 256k)
         #[arg(short = 'b', long, default_value = "128k")]
         bitrate: String,
@@ -56,6 +58,24 @@ enum Commands {
         /// Replace existing files and playlists if they already exist
         #[arg(short = 'R', long)]
         replace: bool,
+    },
+    /// Join already-downloaded chapters into m4b audiobook file(s) with chapter metadata.
+    /// Files larger than 500 MB are automatically split into parts.
+    Join {
+        /// Book entity ID (used to fetch chapter metadata)
+        book_id: u32,
+        /// Directory containing the downloaded chapter files (*.m4a)
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Output directory (default: same as input directory)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Audio bitrate for re-encoding (default: 128k)
+        #[arg(short = 'b', long, default_value = "128k")]
+        bitrate: String,
+        /// Path to cover image to embed (optional)
+        #[arg(short = 'c', long)]
+        cover: Option<PathBuf>,
     },
 }
 
@@ -123,7 +143,7 @@ async fn main() -> Result<()> {
             book_id,
             output,
             chapters,
-            compile,
+            no_join,
             bitrate,
             add_to_apple_music,
             replace,
@@ -145,12 +165,8 @@ async fn main() -> Result<()> {
 
             std::fs::create_dir_all(&output_dir)?;
 
-            // Parse chapter filter
-            let chapter_filter: Option<Vec<usize>> = chapters.map(|s| {
-                s.split(',')
-                    .filter_map(|n| n.trim().parse::<usize>().ok())
-                    .collect()
-            });
+            // Parse chapter filter (supports singles and ranges, e.g. "1,3..5,7..")
+            let chapter_filter = chapters.as_deref().map(chapters::parse_chapters);
 
             // Get resource permissions for CDN access
             let resource_permissions_pb: ProgressBar = ProgressBar::new_spinner();
@@ -210,12 +226,10 @@ async fn main() -> Result<()> {
                 .iter()
                 .enumerate()
                 .filter(|(idx, _)| {
-                    let chapter_num = idx + 1;
-                    if let Some(ref filter) = chapter_filter {
-                        filter.contains(&chapter_num)
-                    } else {
-                        true
-                    }
+                    let chapter_num = (idx + 1) as u32;
+                    chapter_filter.as_ref().is_none_or(|filter| {
+                        filter.iter().any(|spec| spec.matches(chapter_num))
+                    })
                 })
                 .collect();
 
@@ -290,21 +304,11 @@ async fn main() -> Result<()> {
 
             overall_pb.finish_with_message("✅ All chapters complete!");
 
-            // Compile chapters into m4b if requested
-            if compile && !downloaded_files.is_empty() {
+            // Join chapters into m4b unless explicitly skipped
+            if !no_join && !downloaded_files.is_empty() {
                 println!();
-                let compile_pb = ProgressBar::new_spinner();
-                compile_pb.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner:.green} {msg}")
-                        .expect("Invalid template")
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                );
-                compile_pb.set_message("📦 Compiling chapters into m4b audiobook...");
-                compile_pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
                 let cover_for_m4b = cover_path.as_ref().map(|p| p.as_path());
-                let m4b_path = audiobook::compile_to_m4b_with_artwork(
+                audiobook::compile_to_m4b_with_artwork(
                     &book,
                     &downloaded_files,
                     &output_dir,
@@ -312,8 +316,6 @@ async fn main() -> Result<()> {
                     cover_for_m4b,
                 )
                 .await?;
-
-                compile_pb.finish_with_message(format!("✓ Compiled to: {}", m4b_path.display()));
             }
 
             // Add to Apple Music playlist if requested
@@ -341,6 +343,57 @@ async fn main() -> Result<()> {
                 let _ = std::fs::remove_dir_all(&temp_dir);
                 println!("Cleaned up temporary files");
             }
+        }
+        Commands::Join {
+            book_id,
+            input,
+            output,
+            bitrate,
+            cover,
+        } => {
+            let token = config::load_token()?;
+            let client = api::FonosClient::new(token);
+
+            let book = client.get_book_details(book_id).await?;
+
+            // Collect chapter files from input directory, sorted by name
+            let mut chapter_files: Vec<PathBuf> = std::fs::read_dir(&input)?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().map(|e| e == "m4a").unwrap_or(false))
+                .collect();
+            chapter_files.sort();
+
+            if chapter_files.is_empty() {
+                anyhow::bail!("No .m4a files found in: {}", input.display());
+            }
+
+            if chapter_files.len() != book.chapters.len() {
+                eprintln!(
+                    "⚠ Warning: found {} .m4a files but book has {} chapters — chapter names may be misaligned",
+                    chapter_files.len(),
+                    book.chapters.len()
+                );
+            }
+
+            let output_dir = output.unwrap_or_else(|| input.clone());
+            std::fs::create_dir_all(&output_dir)?;
+
+            println!(
+                "📦 Joining {} chapters from {} ...",
+                chapter_files.len(),
+                input.display()
+            );
+
+            let cover_path = cover.as_ref().map(|p| p.as_path());
+            audiobook::compile_to_m4b_with_artwork(
+                &book,
+                &chapter_files,
+                &output_dir,
+                &bitrate,
+                cover_path,
+            )
+            .await?;
         }
     }
 

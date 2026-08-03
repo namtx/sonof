@@ -120,6 +120,19 @@ Download specific chapters only:
 sonof download 1120 --chapters "1,2,3,10,20"
 ```
 
+Chapter ranges are supported too (`..` is inclusive, open ends allowed):
+
+```bash
+# Chapters 1 through 10
+sonof download 1120 --chapters "1..10"
+
+# From chapter 3 to the end
+sonof download 1120 --chapters "3.."
+
+# First 5 chapters
+sonof download 1120 --chapters "..5"
+```
+
 ## Common Commands
 
 ```bash
@@ -139,7 +152,7 @@ sonof list
 sonof download 1120
 
 # Download chapters 1-10 to custom directory
-sonof download 1120 --chapters "1,2,3,4,5,6,7,8,9,10" --output ~/Books
+sonof download 1120 --chapters "1..10" --output ~/Books
 ```
 
 ## Tips & Tricks
@@ -157,7 +170,7 @@ done
 
 ```bash
 # Download first 5 chapters only
-sonof download 1120 --chapters "1,2,3,4,5"
+sonof download 1120 --chapters "1..5"
 
 # Download specific chapters
 sonof download 1120 --chapters "1,10,20,30"

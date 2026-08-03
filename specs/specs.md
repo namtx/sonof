@@ -11,6 +11,26 @@ An command line tool to download audio books from the Fonos app.
 - Embed artwork into individual chapter files
 - Compile chapters into a single m4b audiobook file with embedded metadata, chapter markers, and cover artwork
 
+### Chapter selection
+
+The `download` command accepts a `--chapters` / `-c` flag to select specific
+chapters. Chapters are 1-indexed.
+
+Syntax (Rust-slice style, comma-separated tokens):
+
+- `5` — single chapter
+- `2..5` — inclusive range from chapter 2 to chapter 5
+- `2..` — from chapter 2 to the last chapter
+- `..5` — from chapter 1 to chapter 5
+- Mixed: `1,3..5,7..,..4`
+
+Behavior:
+
+- Malformed tokens (non-numeric, stray hyphens, empty tokens) are silently ignored.
+- Reversed ranges (`5..2`) are normalized to `2..5`.
+- Chapter numbers outside the book's chapter count never match.
+- Selected chapters are always downloaded in book order.
+
 #### List all books in the user's library
 
 API: `https://production.fonos.dev/users/my-library`

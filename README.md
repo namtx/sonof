@@ -142,11 +142,21 @@ sonof download BOOK_ID -c "1,2,3,5,10"
 
 This will only download chapters 1, 2, 3, 5, and 10.
 
+Chapter selection also supports ranges (Rust-slice style, chapters are 1-indexed):
+
+- `5` — a single chapter
+- `2..5` — chapters 2 through 5 (inclusive)
+- `2..` — from chapter 2 to the end
+- `..5` — chapters 1 through 5
+- Any mix, comma-separated: `-c "1,3..5,7..,..4"`
+
+Reversed ranges (`5..2`) are treated as `2..5`. Malformed tokens are silently ignored, and chapters outside the book's range are simply skipped.
+
 Example:
 ```bash
-sonof download 1120 --chapters "1,2,3" --output ~/Audiobooks
+sonof download 1120 --chapters "1..3" --output ~/Audiobooks
 # or with short flags
-sonof download 1120 -c "1,2,3" -o ~/Audiobooks
+sonof download 1120 -c "1..3" -o ~/Audiobooks
 ```
 
 #### Compile chapters into a single m4b audiobook
